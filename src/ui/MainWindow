@@ -1,0 +1,140 @@
+# GUI Overview (MainWindow)
+# ------------------------------
+# - Create a window with a white canvas
+# - Click on the canvas to add cities (visualized as blue dots)
+# - GUI controls allow user input for:
+#     - α (alpha): influence of pheromone trails
+#     - β (beta): influence of distance
+#     - ρ (rho): pheromone evaporation rate
+#     - Iterationen: number of ACO iterations
+# - Start button runs the ACO algorithm in a separate thread
+# - After completion, the best found route is drawn in red
+
+import tkinter as tk
+from tkinter import ttk
+import random
+import threading
+
+from core.villes import Villes
+from core.colonie_fourmis import ColonieFourmis
+from core.pheromones import PheromoneSystem
+
+class MainWindow(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Ant Colony Optimization - TSP")
+        self.geometry("800x600")
+
+        self.villes = Villes()
+        self.pheromones = PheromoneSystem(0)
+        self.colonie_fourmis = None
+        self.running = False
+
+        self.controls_frame = tk.Frame(self)
+        self.controls_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Eingabefelder für Parameter
+        tk.Label(self.controls_frame, text="α:").pack(side=tk.LEFT)
+        self.alpha_entry = tk.Entry(self.controls_frame, width=5)
+        self.alpha_entry.insert(0, "1.0")
+        self.alpha_entry.pack(side=tk.LEFT, padx=2)
+
+        tk.Label(self.controls_frame, text="β:").pack(side=tk.LEFT)
+        self.beta_entry = tk.Entry(self.controls_frame, width=5)
+        self.beta_entry.insert(0, "5.0")
+        self.beta_entry.pack(side=tk.LEFT, padx=2)
+
+        tk.Label(self.controls_frame, text="ρ:").pack(side=tk.LEFT)
+        self.rho_entry = tk.Entry(self.controls_frame, width=5)
+        self.rho_entry.insert(0, "0.1")
+        self.rho_entry.pack(side=tk.LEFT, padx=2)
+
+        tk.Label(self.controls_frame, text="Iterationen:").pack(side=tk.LEFT)
+        self.iter_entry = tk.Entry(self.controls_frame, width=6)
+        self.iter_entry.insert(0, "100")
+        self.iter_entry.pack(side=tk.LEFT, padx=2)
+
+        self.start_button = ttk.Button(self.controls_frame, text="Start", command=self.toggle_simulation)
+        self.start_button.pack(side=tk.LEFT, padx=10)
+
+        self.canvas = tk.Canvas(self, bg="white")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.canvas.bind("<Button-1>", self.add_city)
+
+    def add_city(self, event):
+        x, y = event.x, event.y
+        self.canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill='blue')
+        self.villes.add_city(x, y)
+        self.pheromones = PheromoneSystem(len(self.villes.positions))
+        self.colonie_fourmis = ColonieFourmis(self.villes, self.pheromones,
+                                              alpha=float(self.alpha_entry.get()),
+                                              beta=float(self.beta_entry.get()))
+
+    def toggle_simulation(self):
+        if not self.running:
+            self.running = True
+            self.start_button.config(text="Stop")
+            self.iterations = 0
+            self.max_iterations = int(self.iter_entry.get())
+            self.pheromones.evaporation_rate = float(self.rho_entry.get())
+            threading.Thread(target=self.run_simulation).start()
+        else:
+            self.running = False
+            self.start_button.config(text="Start")
+
+    def run_simulation(self):
+        while self.running and self.iterations < self.max_iterations:
+            paths = []
+            path_lengths = []
+
+            for _ in range(len(self.villes.positions)):
+                path = []
+                visited = set()
+                current = random.randint(0, len(self.villes.positions) - 1)
+                visited.add(current)
+                path.append(current)
+
+                while len(visited) < len(self.villes.positions):
+                    next_city = self.colonie_fourmis.select_ville_suivante(current, visited)
+                    path.append(next_city)
+                    visited.add(next_city)
+                    current = next_city
+
+                paths.append(path)
+                path_lengths.append(self.calculate_path_length(path))
+
+            self.pheromones.update(paths, path_lengths)
+            self.draw_best_path(paths, path_lengths)
+            self.iterations += 1
+            self.after(100)
+
+    def calculate_path_length(self, path):
+        distances = self.villes.get_distance_matrix()
+        total = 0
+        for i in range(len(path) - 1):
+            total += distances[path[i]][path[i + 1]]
+        return total
+
+    def draw_best_path(self, paths, lengths):
+        self.canvas.delete("path")
+        if not paths:
+            return
+        best_index = lengths.index(min(lengths))
+        path = paths[best_index]
+        for i in range(len(path) - 1):
+            x1, y1 = self.villes.positions[path[i]]
+            x2, y2 = self.villes.positions[path[i + 1]]
+            self.canvas.create_line(x1, y1, x2, y2, fill="red", tags="path")
+        # Rückweg zum Startpunkt (optional)
+        x1, y1 = self.villes.positions[path[-1]]
+        x2, y2 = self.villes.positions[path[0]]
+        self.canvas.create_line(x1, y1, x2, y2, fill="red", tags="path")
+
+
+def main():
+    app = MainWindow()
+    app.mainloop()
+
+if __name__ == "__main__":
+    main()
